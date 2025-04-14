@@ -18,8 +18,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-# Return CERES LWDR block data dictionary, where the key is the block's top-left coordinates and the value is the block's xarray data (longitude, latitude, time)
-# Read CERES data without parallel processing
+# Return ERA5 LWDR block data dictionary, where the key is the block's top-left coordinates and the value is the block's xarray data (longitude, latitude, time)
+# Read ERA5 data without parallel processing
 def read_era5_nc_file(start_date, num_day_of_read, step):
     # Read ERA5 LWDR data; input parameters: start date and number of days to read
     # start_date: pd.Timestamp;
@@ -71,7 +71,7 @@ def read_era5_nc_file(start_date, num_day_of_read, step):
                 latitude=slice(lat_key + 0.25, lat_key - step - 0.25),
                 longitude=slice(lon_key - 0.25, lon_key + step + 0.25)
             )
-    print("Reading CERES LWDR data done!")
+    print("Reading ERA5 LWDR data done!")
     return era5_lwdr_block_dict
 
 
@@ -180,7 +180,7 @@ def read_modis_lwdr_file(start_date, num_day_of_read, step, resolution, num_proc
     return all_modis_lwdr_block_dict
 
 
-def time_space_interpolation(block_key, CERES_LWDR_origin_array, swaths, start_date, num_day_of_read, step, resolution):
+def time_space_interpolation(block_key, ERA5_LWDR_origin_array, swaths, start_date, num_day_of_read, step, resolution):
     cols = int(step / resolution)
     rows = int(step / resolution)
     start_lat, start_lon = block_key
@@ -211,17 +211,17 @@ def time_space_interpolation(block_key, CERES_LWDR_origin_array, swaths, start_d
         origin_modis_grid_LWDR.where(origin_modis_grid_LWDR != -999, np.nan)
     )
     origin_modis_grid_LWDR = origin_modis_grid_LWDR.astype(np.float16)
-    CERES_LWDR_origin_array = CERES_LWDR_origin_array.astype(np.float16)
-    CERES_LWDR_temp_array = CERES_LWDR_origin_array.interp(latitude=origin_modis_grid_LWDR.latitude,
+    ERA5_LWDR_origin_array = ERA5_LWDR_origin_array.astype(np.float16)
+    ERA5_LWDR_temp_array = ERA5_LWDR_origin_array.interp(latitude=origin_modis_grid_LWDR.latitude,
                                                            longitude=origin_modis_grid_LWDR.longitude,
                                                            method='linear').astype(np.float16)
-    OLR_delta_temp_array = origin_modis_grid_LWDR - CERES_LWDR_temp_array.interp(time=origin_modis_grid_LWDR.time,
+    LWDR_delta_temp_array = origin_modis_grid_LWDR - ERA5_LWDR_temp_array.interp(time=origin_modis_grid_LWDR.time,
                                                                                  method='linear').astype(np.float16)
     del origin_modis_grid_LWDR
-    OLR_delta_temp_array = (OLR_delta_temp_array.ffill(dim='time') + OLR_delta_temp_array.bfill(dim='time')) / 2
-    OLR_delta_temp_array = OLR_delta_temp_array.resample(time='1h').mean().astype(np.float16)
-    modis_LWDR_array = CERES_LWDR_temp_array + OLR_delta_temp_array
-    del CERES_LWDR_temp_array, OLR_delta_temp_array
+    LWDR_delta_temp_array = (LWDR_delta_temp_array.ffill(dim='time') + LWDR_delta_temp_array.bfill(dim='time')) / 2
+    LWDR_delta_temp_array = LWDR_delta_temp_array.resample(time='1h').mean().astype(np.float16)
+    modis_LWDR_array = ERA5_LWDR_temp_array + LWDR_delta_temp_array
+    del ERA5_LWDR_temp_array, LWDR_delta_temp_array
     effect_time = pd.date_range(start_date + pd.Timedelta(days=1), end_date - pd.Timedelta(days=1), freq='1h',
                                 inclusive='left')
     modis_LWDR_array = modis_LWDR_array.sel(time=effect_time).astype(np.float16)
@@ -399,7 +399,7 @@ if __name__ == "__main__":
             freq="1h",
             inclusive="left",
         )
-        CERES_LWDR_block_dict = read_era5_nc_file(start_date, num_day_of_read, step)
+        ERA5_LWDR_block_dict = read_era5_nc_file(start_date, num_day_of_read, step)
         num_proces_of_reading = 50
         modis_LWDR_block_dict = read_modis_lwdr_file(
             start_date,
@@ -411,17 +411,17 @@ if __name__ == "__main__":
         num_process_of_space_time_scaling = 16
         pool = multiprocessing.Pool(num_process_of_space_time_scaling)
         block_keys = []
-        CERES_LWDR_block_list = []
+        ERA5_LWDR_block_list = []
         modis_swaths_list = []
         for lat_key in np.arange(90, -90, -step):
             for lon_key in np.arange(-180, 180, step):
                 block_key = lat_key, lon_key
                 block_keys.append(block_key)
-                CERES_LWDR_block_list.append(CERES_LWDR_block_dict[block_key])
+                ERA5_LWDR_block_list.append(ERA5_LWDR_block_dict[block_key])
                 swaths = modis_LWDR_block_dict[block_key]
                 modis_swaths_list.append(swaths)
-        del CERES_LWDR_block_dict, modis_LWDR_block_dict
-        params = zip(block_keys, CERES_LWDR_block_list, modis_swaths_list)
+        del ERA5_LWDR_block_dict, modis_LWDR_block_dict
+        params = zip(block_keys, ERA5_LWDR_block_list, modis_swaths_list)
         partial_time_space_interpolation = partial(
             time_space_interpolation,
             start_date=start_date,
@@ -430,7 +430,7 @@ if __name__ == "__main__":
             resolution=resolution,
         )
         results = pool.starmap(partial_time_space_interpolation, params)
-        del CERES_LWDR_block_list, modis_swaths_list
+        del ERA5_LWDR_block_list, modis_swaths_list
         pool.close()
         pool.join()
         global_modis_LWDR_grid = xr.combine_by_coords(
