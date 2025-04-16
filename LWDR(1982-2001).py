@@ -132,7 +132,6 @@ for p in tqdm.trange(0, N):
         lat = np.linspace(90, -90, 3600)
         time_var[:] = time
         lat_var[:] = lat
-        lon
-::contentReference[oaicite:0]{index=0}
- 
-
+        lon_var[:] = lon
+        lwdr_var[:] = predicted_3d
+    print(f"save to {output_file} ")
